@@ -1,0 +1,9 @@
+Flask==3.0.0
+vaderSentiment==3.3.2
+requests==2.31.0
+gunicorn==21.2.0
+transformers==4.45.2
+torch==2.4.1
+accelerate==1.0.1
+google-generativeai==0.3.2
+python-dotenv==1.0.0
