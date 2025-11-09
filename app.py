@@ -16,11 +16,21 @@ import smtplib
 import os
 import re
 import json
+import sys
 import requests
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Print startup information for debugging
+print("=" * 50)
+print("Starting Email Tone Checker Application")
+print("=" * 50)
+print(f"Python version: {sys.version}")
+print(f"PORT environment variable: {os.environ.get('PORT', 'Not set')}")
+print("=" * 50)
 
 # Try to import Gemini (optional)
 try:
@@ -37,16 +47,23 @@ app = Flask(__name__,
             static_folder='static')
 app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-this-in-production-for-local-use')
 
-# Initialize analyzers with enhanced VADER settings
-vader_analyzer = SentimentIntensityAnalyzer()
-# Enhance VADER lexicon with email-specific terms
-vader_analyzer.lexicon.update({
-    'urgent': -0.5, 'asap': -1.5, 'immediately': -1.0,
-    'please': 0.5, 'thank you': 1.5, 'thanks': 1.0, 'appreciate': 1.2,
-    'regards': 0.3, 'best regards': 0.8, 'sincerely': 0.4,
-    'unfortunately': -0.7, 'disappointed': -1.2, 'concerned': -0.5,
-    'excellent': 1.5, 'great': 1.2, 'wonderful': 1.4
-})
+# Initialize analyzers with enhanced VADER settings (with error handling)
+try:
+    vader_analyzer = SentimentIntensityAnalyzer()
+    # Enhance VADER lexicon with email-specific terms
+    vader_analyzer.lexicon.update({
+        'urgent': -0.5, 'asap': -1.5, 'immediately': -1.0,
+        'please': 0.5, 'thank you': 1.5, 'thanks': 1.0, 'appreciate': 1.2,
+        'regards': 0.3, 'best regards': 0.8, 'sincerely': 0.4,
+        'unfortunately': -0.7, 'disappointed': -1.2, 'concerned': -0.5,
+        'excellent': 1.5, 'great': 1.2, 'wonderful': 1.4
+    })
+    VADER_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: VADER analyzer initialization failed: {e}")
+    vader_analyzer = None
+    VADER_AVAILABLE = False
+
 sentiment_pipeline = None
 toxicity_pipeline = None
 gen_pipeline = None
@@ -185,8 +202,18 @@ def classify_tone(text):
                 hey_used_rudely = True
 
     # Enhanced VADER analysis with context-aware scoring
-    vader_scores = vader_analyzer.polarity_scores(text)
-    compound_score = vader_scores.get('compound', 0.0)
+    try:
+        if vader_analyzer is not None and VADER_AVAILABLE:
+            vader_scores = vader_analyzer.polarity_scores(text)
+            compound_score = vader_scores.get('compound', 0.0)
+        else:
+            # Fallback if VADER not available
+            vader_scores = {'compound': 0.0, 'pos': 0.0, 'neg': 0.0, 'neu': 1.0}
+            compound_score = 0.0
+    except Exception as e:
+        print(f"Error in VADER analysis: {e}")
+        vader_scores = {'compound': 0.0, 'pos': 0.0, 'neg': 0.0, 'neu': 1.0}
+        compound_score = 0.0
     
     # Refine compound score based on context and length
     text_length = len(text.split())
@@ -702,7 +729,16 @@ def index():
         print(f"Error rendering template: {e}")
         import traceback
         traceback.print_exc()
-        return f"<h1>Email Tone Checker</h1><p>Service is running. Template error: {str(e)}</p>", 200
+        # Return a simple HTML page if template fails
+        return f"""<!DOCTYPE html>
+<html>
+<head><title>Email Tone Checker</title></head>
+<body>
+    <h1>Email Tone Checker</h1>
+    <p>Service is running. Template error: {str(e)}</p>
+    <p><a href="/health">Health Check</a></p>
+</body>
+</html>""", 200
 
 @app.route('/analyze_email', methods=['POST'])
 def analyze_email():
@@ -970,10 +1006,23 @@ def health():
         return jsonify({
             'status': 'healthy',
             'service': 'email-tone-checker',
-            'transformers_available': TRANSFORMERS_AVAILABLE
+            'transformers_available': TRANSFORMERS_AVAILABLE,
+            'vader_available': VADER_AVAILABLE,
+            'port': os.environ.get('PORT', 'not set')
         }), 200
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/test')
+def test():
+    """Simple test endpoint to verify app is responding"""
+    return jsonify({
+        'message': 'App is running',
+        'status': 'ok',
+        'timestamp': datetime.now().isoformat()
+    }), 200
 
 @app.errorhandler(404)
 def not_found(error):
@@ -985,7 +1034,22 @@ def method_not_allowed(error):
 
 @app.errorhandler(500)
 def internal_error(error):
+    import traceback
+    print(f"Internal server error: {error}")
+    traceback.print_exc()
     return jsonify({'error': 'Internal server error'}), 500
+
+# Add before_request handler to ensure app is ready
+@app.before_request
+def before_request():
+    """Ensure app is ready to handle requests"""
+    try:
+        # Test that critical components are available
+        if not VADER_AVAILABLE and vader_analyzer is None:
+            print("Warning: VADER analyzer not available")
+    except Exception as e:
+        print(f"Warning in before_request: {e}")
+    return None
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

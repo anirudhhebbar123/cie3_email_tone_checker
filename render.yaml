@@ -3,7 +3,7 @@ services:
     name: email-tone-checker
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --keep-alive 5 --access-logfile - --error-logfile -
+    startCommand: python start_server.py
     healthCheckPath: /health
     envVars:
       - key: SECRET_KEY
