@@ -1,6 +1,12 @@
 from flask import Flask, render_template, request, session, jsonify
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from transformers import pipeline
+# Make transformers optional to avoid startup issues on Render
+try:
+    from transformers import pipeline
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+    pipeline = None
 import imaplib
 import email
 from email.header import decode_header
@@ -60,6 +66,8 @@ def get_generation_pipeline():
     Model can be overridden with GEN_MODEL env var (default: google/flan-t5-small).
     """
     global gen_pipeline
+    if not TRANSFORMERS_AVAILABLE or pipeline is None:
+        return None
     if gen_pipeline is not None:
         return gen_pipeline
     try:
@@ -72,6 +80,10 @@ def get_generation_pipeline():
 
 def get_pipelines():
     global sentiment_pipeline, toxicity_pipeline
+    # Skip if transformers not available
+    if not TRANSFORMERS_AVAILABLE or pipeline is None:
+        return None, None
+    
     # Skip loading heavy transformer models on Render or if explicitly disabled
     # These models are too large for free tier and cause timeouts
     if os.environ.get('DISABLE_TRANSFORMER_MODELS', '').lower() in ('true', '1', 'yes'):
@@ -683,7 +695,14 @@ def create_rule_based_rewrites(text, tone):
 
 @app.route('/')
 def index():
-    return render_template('dashboard.html')
+    """Main dashboard route"""
+    try:
+        return render_template('dashboard.html')
+    except Exception as e:
+        print(f"Error rendering template: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"<h1>Email Tone Checker</h1><p>Service is running. Template error: {str(e)}</p>", 200
 
 @app.route('/analyze_email', methods=['POST'])
 def analyze_email():
@@ -946,7 +965,15 @@ def fetch_emails():
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'healthy'})
+    """Health check endpoint for Render"""
+    try:
+        return jsonify({
+            'status': 'healthy',
+            'service': 'email-tone-checker',
+            'transformers_available': TRANSFORMERS_AVAILABLE
+        }), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.errorhandler(404)
 def not_found(error):
