@@ -72,6 +72,16 @@ def get_generation_pipeline():
 
 def get_pipelines():
     global sentiment_pipeline, toxicity_pipeline
+    # Skip loading heavy transformer models on Render or if explicitly disabled
+    # These models are too large for free tier and cause timeouts
+    if os.environ.get('DISABLE_TRANSFORMER_MODELS', '').lower() in ('true', '1', 'yes'):
+        return None, None
+    
+    # Skip loading models in production (when PORT is set) unless explicitly enabled
+    # This prevents timeouts on Render and other cloud platforms
+    if os.environ.get('PORT') and not os.environ.get('ENABLE_TRANSFORMER_MODELS', '').lower() in ('true', '1', 'yes'):
+        return None, None
+    
     try:
         if sentiment_pipeline is None:
             sentiment_pipeline = pipeline(
@@ -90,7 +100,8 @@ def get_pipelines():
     except Exception as e:
         print(f"Error loading pipelines: {e}")
         # Return None if pipelines fail to load - will use fallback methods
-        pass
+        sentiment_pipeline = None
+        toxicity_pipeline = None
     return sentiment_pipeline, toxicity_pipeline
 
 # Tone detection keywords
