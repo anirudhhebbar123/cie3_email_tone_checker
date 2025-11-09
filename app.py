@@ -10,6 +10,7 @@ import smtplib
 import os
 import re
 import json
+import requests
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -273,7 +274,6 @@ Return ONLY valid JSON in this exact format (no other text):
 
     # Use Gemini
     if model_type == 'gemini':
-        import requests
         api_key = get_gemini_api_key()
         if not api_key:
             return None
@@ -306,7 +306,6 @@ Return ONLY valid JSON in this exact format (no other text):
     
     # Use OpenRouter
     elif model_type == 'openrouter':
-        import requests
         api_key = get_openrouter_api_key()
         if not api_key:
             return None
@@ -710,10 +709,16 @@ def analyze_email():
             recommendations.append('Friendly tone is great for maintaining relationships')
             recommendations.append('Maintain professionalism while being warm')
         
+        # Ensure all values are JSON serializable
+        serializable_vader_scores = {
+            k: float(v) if isinstance(v, (int, float)) else v 
+            for k, v in vader_scores.items()
+        }
+        
         return jsonify({
             'tone': tone,
             'confidence': round(confidence, 2),
-            'vader_scores': vader_scores,
+            'vader_scores': serializable_vader_scores,
             'suggestions': suggestions,
             'recommendations': recommendations
         })
@@ -726,20 +731,23 @@ def analyze_email():
 @app.route('/send_email', methods=['POST'])
 def send_email():
     """Send email using SMTP"""
-    data = request.get_json()
-    recipient_email = data.get('recipient_email', '').strip()
-    email_text = data.get('email_text', '').strip()
-    sender_email = data.get('sender_email', '').strip()
-    sender_password = data.get('sender_password', '').strip()
-    subject = data.get('subject', 'Email from ToneChecker').strip()
-    
-    if not recipient_email or not email_text:
-        return jsonify({'error': 'Recipient email and message text are required'}), 400
-    
-    if not sender_email or not sender_password:
-        return jsonify({'error': 'Sender email and password are required'}), 400
-    
     try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid request data'}), 400
+        
+        recipient_email = data.get('recipient_email', '').strip()
+        email_text = data.get('email_text', '').strip()
+        sender_email = data.get('sender_email', '').strip()
+        sender_password = data.get('sender_password', '').strip()
+        subject = data.get('subject', 'Email from ToneChecker').strip()
+        
+        if not recipient_email or not email_text:
+            return jsonify({'error': 'Recipient email and message text are required'}), 400
+        
+        if not sender_email or not sender_password:
+            return jsonify({'error': 'Sender email and password are required'}), 400
+        
         # Validate email format
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         if not re.match(email_pattern, recipient_email):
@@ -790,18 +798,24 @@ def send_email():
     except smtplib.SMTPServerDisconnected:
         return jsonify({'error': 'Connection to email server was lost.'}), 500
     except Exception as e:
+        print(f"Error in send_email: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': f'Failed to send email: {str(e)}'}), 500
 
 @app.route('/fetch_emails', methods=['POST'])
 def fetch_emails():
-    data = request.get_json()
-    email_address = data.get('email')
-    password = data.get('password')
-    
-    if not email_address or not password:
-        return jsonify({'error': 'Email and password required'}), 400
-    
     try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid request data'}), 400
+        
+        email_address = data.get('email')
+        password = data.get('password')
+        
+        if not email_address or not password:
+            return jsonify({'error': 'Email and password required'}), 400
+        
         mail = imaplib.IMAP4_SSL('imap.gmail.com', 993)
         mail.login(email_address, password)
         mail.select('inbox')
@@ -894,13 +908,29 @@ def fetch_emails():
         return jsonify({'emails': emails})
         
     except imaplib.IMAP4.error as e:
+        print(f"IMAP error in fetch_emails: {e}")
         return jsonify({'error': 'Invalid credentials. Please enable "Less secure app access" or use an App Password.'}), 401
     except Exception as e:
+        print(f"Error in fetch_emails: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/health')
 def health():
     return jsonify({'status': 'healthy'})
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    return jsonify({'error': 'Method not allowed'}), 405
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
