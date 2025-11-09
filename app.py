@@ -72,20 +72,25 @@ def get_generation_pipeline():
 
 def get_pipelines():
     global sentiment_pipeline, toxicity_pipeline
-    if sentiment_pipeline is None:
-        sentiment_pipeline = pipeline(
-            'text-classification',
-            model='cardiffnlp/twitter-roberta-base-sentiment-latest',
-            tokenizer='cardiffnlp/twitter-roberta-base-sentiment-latest',
-            top_k=None
-        )
-    if toxicity_pipeline is None:
-        toxicity_pipeline = pipeline(
-            'text-classification',
-            model='unitary/toxic-bert',
-            tokenizer='unitary/toxic-bert',
-            top_k=None
-        )
+    try:
+        if sentiment_pipeline is None:
+            sentiment_pipeline = pipeline(
+                'text-classification',
+                model='cardiffnlp/twitter-roberta-base-sentiment-latest',
+                tokenizer='cardiffnlp/twitter-roberta-base-sentiment-latest',
+                top_k=None
+            )
+        if toxicity_pipeline is None:
+            toxicity_pipeline = pipeline(
+                'text-classification',
+                model='unitary/toxic-bert',
+                tokenizer='unitary/toxic-bert',
+                top_k=None
+            )
+    except Exception as e:
+        print(f"Error loading pipelines: {e}")
+        # Return None if pipelines fail to load - will use fallback methods
+        pass
     return sentiment_pipeline, toxicity_pipeline
 
 # Tone detection keywords
@@ -188,21 +193,33 @@ def classify_tone(text):
     sent_pipe, tox_pipe = get_pipelines()
 
     try:
-        sent_result = sent_pipe(text_for_models)[0]
-        sent_scores = {item['label'].lower(): float(item['score']) for item in sent_result}
-        pos = sent_scores.get('positive', 0.0)
-        neg = sent_scores.get('negative', 0.0)
-        neu = sent_scores.get('neutral', 0.0)
+        if sent_pipe is not None:
+            sent_result = sent_pipe(text_for_models)[0]
+            sent_scores = {item['label'].lower(): float(item['score']) for item in sent_result}
+            pos = sent_scores.get('positive', 0.0)
+            neg = sent_scores.get('negative', 0.0)
+            neu = sent_scores.get('neutral', 0.0)
+        else:
+            # Fallback if pipeline not loaded
+            pos = max(0.0, compound_score) if compound_score > 0.1 else 0.0
+            neg = max(0.0, -compound_score) if compound_score < -0.1 else 0.0
+            neu = max(0.0, 1.0 - pos - neg)
     except Exception as e:
+        print(f"Error in sentiment analysis: {e}")
         pos = max(0.0, compound_score) if compound_score > 0.1 else 0.0
         neg = max(0.0, -compound_score) if compound_score < -0.1 else 0.0
         neu = max(0.0, 1.0 - pos - neg)
 
     try:
-        tox_result = tox_pipe(text_for_models)[0]
-        tox_scores = {item['label'].lower(): float(item['score']) for item in tox_result}
-        toxic_score = tox_scores.get('toxic', tox_scores.get('toxic/other', 0.0)) or 0.0
+        if tox_pipe is not None:
+            tox_result = tox_pipe(text_for_models)[0]
+            tox_scores = {item['label'].lower(): float(item['score']) for item in tox_result}
+            toxic_score = tox_scores.get('toxic', tox_scores.get('toxic/other', 0.0)) or 0.0
+        else:
+            # Fallback if pipeline not loaded
+            toxic_score = 0.3 if rude_keyword_count > 0 or aggressive_pattern_count > 0 else 0.0
     except Exception as e:
+        print(f"Error in toxicity analysis: {e}")
         toxic_score = 0.3 if rude_keyword_count > 0 or aggressive_pattern_count > 0 else 0.0
 
     keyword_rude_boost = min(0.3, rude_keyword_count * 0.15)

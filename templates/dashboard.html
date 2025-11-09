@@ -233,13 +233,29 @@ function analyzeEmail() {
             model_type: modelType
         })
     })
-    .then(response => {
-        if (!response.ok) {
-            return response.json().then(err => {
-                throw new Error(err.error || 'Server error');
-            });
+    .then(async response => {
+        // Check if response has content
+        const contentType = response.headers.get('content-type');
+        const text = await response.text();
+        
+        if (!text || text.trim() === '') {
+            throw new Error('Server returned empty response. Please try again.');
         }
-        return response.json();
+        
+        // Try to parse as JSON
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            console.error('Failed to parse JSON:', text);
+            throw new Error('Server returned invalid response. Please try again.');
+        }
+        
+        if (!response.ok) {
+            throw new Error(data.error || `Server error (${response.status})`);
+        }
+        
+        return data;
     })
     .then(data => {
         if (data.error) {
@@ -312,7 +328,18 @@ function sendEmail() {
             subject: subject
         })
     })
-    .then(response => response.json())
+    .then(async response => {
+        const text = await response.text();
+        if (!text || text.trim() === '') {
+            throw new Error('Server returned empty response');
+        }
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            console.error('Failed to parse JSON:', text);
+            throw new Error('Server returned invalid response');
+        }
+    })
     .then(data => {
         if (data.success) {
             showSendStatus(data.message, 'success');
@@ -326,7 +353,7 @@ function sendEmail() {
     })
     .catch(error => {
         console.error('Error:', error);
-        showSendStatus('Error sending email. Please try again.', 'error');
+        showSendStatus('Error sending email: ' + error.message, 'error');
         sendBtn.disabled = false;
         sendBtn.innerHTML = '<svg class="icon-btn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send Email';
     });
@@ -520,7 +547,18 @@ function fetchEmails() {
         },
         body: JSON.stringify({ email: email, password: password, limit: 20 })
     })
-        .then(response => response.json())
+        .then(async response => {
+            const text = await response.text();
+            if (!text || text.trim() === '') {
+                throw new Error('Server returned empty response');
+            }
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                console.error('Failed to parse JSON:', text);
+                throw new Error('Server returned invalid response');
+            }
+        })
         .then(data => {
             if (data.error) {
                 emailsList.innerHTML = `<div class="error">${data.error}</div>`;
@@ -530,7 +568,7 @@ function fetchEmails() {
         })
         .catch(error => {
             console.error('Error:', error);
-            emailsList.innerHTML = '<div class="error">Error loading emails. Please try again.</div>';
+            emailsList.innerHTML = `<div class="error">Error loading emails: ${error.message}. Please try again.</div>`;
         });
 }
 
