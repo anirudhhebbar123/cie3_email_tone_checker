@@ -814,6 +814,7 @@ def analyze_email():
 @app.route('/send_email', methods=['POST'])
 def send_email():
     """Send email using SMTP"""
+    # Ensure we always return a response
     try:
         data = request.get_json()
         if not data:
@@ -861,25 +862,49 @@ def send_email():
             smtp_server = 'smtp.gmail.com'
             smtp_port = 587
         
-        # Send email
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-        server.login(sender_email, sender_password)
-        text = msg.as_string()
-        server.sendmail(sender_email, recipient_email, text)
-        server.quit()
+        # Send email with timeout handling
+        server = None
+        try:
+            # Set timeout for SMTP operations (30 seconds)
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
+            server.starttls()
+            server.login(sender_email, sender_password)
+            text = msg.as_string()
+            server.sendmail(sender_email, recipient_email, text)
+            
+            return jsonify({
+                'success': True,
+                'message': f'Email sent successfully to {recipient_email}'
+            })
+        finally:
+            # Always close the connection
+            if server:
+                try:
+                    server.quit()
+                except Exception:
+                    try:
+                        server.close()
+                    except Exception:
+                        pass
         
-        return jsonify({
-            'success': True,
-            'message': f'Email sent successfully to {recipient_email}'
-        })
-        
-    except smtplib.SMTPAuthenticationError:
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"SMTP Authentication Error: {e}")
         return jsonify({'error': 'Authentication failed. Please check your email and password, or use an App Password.'}), 401
-    except smtplib.SMTPRecipientsRefused:
+    except smtplib.SMTPRecipientsRefused as e:
+        print(f"SMTP Recipients Refused: {e}")
         return jsonify({'error': 'Recipient email address was refused by the server.'}), 400
-    except smtplib.SMTPServerDisconnected:
+    except smtplib.SMTPServerDisconnected as e:
+        print(f"SMTP Server Disconnected: {e}")
         return jsonify({'error': 'Connection to email server was lost.'}), 500
+    except smtplib.SMTPException as e:
+        print(f"SMTP Exception: {e}")
+        return jsonify({'error': f'SMTP error: {str(e)}'}), 500
+    except TimeoutError as e:
+        print(f"Timeout Error: {e}")
+        return jsonify({'error': 'Connection to email server timed out. Please try again.'}), 500
+    except OSError as e:
+        print(f"Network Error: {e}")
+        return jsonify({'error': f'Network error: {str(e)}. Please check your internet connection.'}), 500
     except Exception as e:
         print(f"Error in send_email: {e}")
         import traceback
